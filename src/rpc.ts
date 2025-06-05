@@ -1,0 +1,94 @@
+import { Socket, Server } from "socket.io"
+
+type JsonRpcRequest = {
+  jsonrpc: "2.0"
+  method: string
+  params?: Record<string, unknown>
+  id?: string | number | null
+}
+
+type JsonRpcResponse =
+  | {
+      jsonrpc: "2.0"
+      result: unknown
+      id: string | number | null
+    }
+  | {
+      jsonrpc: "2.0"
+      error: { code: number; message: string }
+      id: string | number | null
+    }
+
+const isJsonRpcRequest = (obj: any): obj is JsonRpcRequest => {
+  return (
+    obj &&
+    obj.jsonrpc === "2.0" &&
+    typeof obj.method === "string" &&
+    (obj.id === undefined || typeof obj.id === "string" || typeof obj.id === "number" || obj.id === null)
+  )
+}
+
+export const handleRpc = (socket: Socket, io: Server) => {
+  socket.on("rpc", (req: unknown) => {
+    try {
+      if (!isJsonRpcRequest(req)) {
+        const error: JsonRpcResponse = {
+          jsonrpc: "2.0",
+          error: { code: -32600, message: "Invalid Request" },
+          id: null
+        }
+        socket.emit("rpc", error)
+        return
+      }
+
+      const { method, params, id } = req
+
+      if (method === "message") {
+        const message = params?.message
+        const username = params?.username
+
+        if (typeof message !== "string" || typeof username !== "string") {
+          socket.emit("rpc", {
+            jsonrpc: "2.0",
+            error: { code: -32602, message: "Invalid params" },
+            id
+          })
+          return
+        }
+
+        const response = {
+          id: Date.now().toString(),
+          content: message,
+          author: username,
+          timestamp: Date.now()
+        }
+
+        io.emit("rpc", {
+          jsonrpc: "2.0",
+          method: "message",
+          params: response
+        })
+
+        socket.emit("rpc", {
+          jsonrpc: "2.0",
+          result: "ok",
+          id
+        })
+      } else {
+        socket.emit("rpc", {
+          jsonrpc: "2.0",
+          error: { code: -32601, message: "Method not found" },
+          id
+        })
+      }
+    } catch (err) {
+      console.error("Error in RPC handler:", err)
+      socket.emit("rpc", {
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Internal server error" },
+        id: null
+      })
+    }
+  })
+}
+
