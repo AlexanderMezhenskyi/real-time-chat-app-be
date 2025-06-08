@@ -22,14 +22,14 @@ io.on("connection", (socket) => {
   })
 })
 
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`)
-})
-
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err)
 })
 
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled Rejection:", reason)
+})
+
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`)
 })
