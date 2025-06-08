@@ -24,7 +24,10 @@ const isJsonRpcRequest = (obj: any): obj is JsonRpcRequest => {
     obj &&
     obj.jsonrpc === "2.0" &&
     typeof obj.method === "string" &&
-    (obj.id === undefined || typeof obj.id === "string" || typeof obj.id === "number" || obj.id === null)
+    (obj.id === undefined ||
+      typeof obj.id === "string" ||
+      typeof obj.id === "number" ||
+      obj.id === null)
   )
 }
 
@@ -35,7 +38,7 @@ export const handleRpc = (socket: Socket, io: Server) => {
         const error: JsonRpcResponse = {
           jsonrpc: "2.0",
           error: { code: -32600, message: "Invalid Request" },
-          id: null
+          id: null,
         }
         socket.emit("rpc", error)
         return
@@ -43,15 +46,36 @@ export const handleRpc = (socket: Socket, io: Server) => {
 
       const { method, params, id } = req
 
+      if (method === "joinRoom") {
+        const room = params?.room
+        if (typeof room !== "string") {
+          socket.emit("rpc", {
+            jsonrpc: "2.0",
+            error: { code: -32602, message: "Invalid room param" },
+            id,
+          })
+          return
+        }
+
+        socket.join(room)
+        socket.emit("rpc", {
+          jsonrpc: "2.0",
+          result: `Joined room: ${room}`,
+          id,
+        })
+        return
+      }
+
       if (method === "message") {
         const message = params?.message
         const username = params?.username
+        const room = params?.room
 
         if (typeof message !== "string" || typeof username !== "string") {
           socket.emit("rpc", {
             jsonrpc: "2.0",
             error: { code: -32602, message: "Invalid params" },
-            id
+            id,
           })
           return
         }
@@ -60,33 +84,43 @@ export const handleRpc = (socket: Socket, io: Server) => {
           id: Date.now().toString(),
           content: message,
           author: username,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          room: typeof room === "string" ? room : null,
         }
 
-        io.emit("rpc", {
-          jsonrpc: "2.0",
-          method: "message",
-          params: response
-        })
+        if (typeof room === "string") {
+          io.to(room).emit("rpc", {
+            jsonrpc: "2.0",
+            method: "message",
+            params: response,
+          })
+        } else {
+          io.emit("rpc", {
+            jsonrpc: "2.0",
+            method: "message",
+            params: response,
+          })
+        }
 
         socket.emit("rpc", {
           jsonrpc: "2.0",
           result: "ok",
-          id
+          id,
         })
-      } else {
-        socket.emit("rpc", {
-          jsonrpc: "2.0",
-          error: { code: -32601, message: "Method not found" },
-          id
-        })
+        return
       }
+
+      socket.emit("rpc", {
+        jsonrpc: "2.0",
+        error: { code: -32601, message: "Method not found" },
+        id,
+      })
     } catch (err) {
       console.error("Error in RPC handler:", err)
       socket.emit("rpc", {
         jsonrpc: "2.0",
         error: { code: -32000, message: "Internal server error" },
-        id: null
+        id: null,
       })
     }
   })
