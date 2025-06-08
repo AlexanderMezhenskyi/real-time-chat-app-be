@@ -31,6 +31,8 @@ const isJsonRpcRequest = (obj: any): obj is JsonRpcRequest => {
   )
 }
 
+const userRooms = new Map<string, string>()
+
 export const handleRpc = (socket: Socket, io: Server) => {
   socket.on("rpc", (req: unknown) => {
     try {
@@ -48,16 +50,49 @@ export const handleRpc = (socket: Socket, io: Server) => {
 
       if (method === "joinRoom") {
         const room = params?.room
-        if (typeof room !== "string") {
+        const username = params?.username
+
+        if (typeof room !== "string" || typeof username !== "string") {
           socket.emit("rpc", {
             jsonrpc: "2.0",
-            error: { code: -32602, message: "Invalid room param" },
+            error: { code: -32602, message: "Invalid room or username param" },
             id,
           })
+
           return
         }
 
+        const previousRoom = userRooms.get(socket.id)
+        socket.data.username = username
+
+        if (previousRoom && previousRoom !== room) {
+          socket.leave(previousRoom)
+          userRooms.delete(socket.id)
+
+          const usersInOldRoom = Array.from(userRooms.entries())
+            .filter(([_, r]) => r === previousRoom)
+            .map(([id]) => io.sockets.sockets.get(id)?.data.username ?? id)
+
+          io.to(previousRoom).emit("rpc", {
+            jsonrpc: "2.0",
+            method: "activeUsers",
+            params: { room: previousRoom, users: usersInOldRoom },
+          })
+        }
+
         socket.join(room)
+        userRooms.set(socket.id, room)
+
+        const usersInNewRoom = Array.from(userRooms.entries())
+          .filter(([_, r]) => r === room)
+          .map(([id]) => io.sockets.sockets.get(id)?.data.username ?? id)
+
+        io.to(room).emit("rpc", {
+          jsonrpc: "2.0",
+          method: "activeUsers",
+          params: { room, users: usersInNewRoom },
+        })
+
         socket.emit("rpc", {
           jsonrpc: "2.0",
           result: `Joined room: ${room}`,
@@ -121,6 +156,24 @@ export const handleRpc = (socket: Socket, io: Server) => {
         jsonrpc: "2.0",
         error: { code: -32000, message: "Internal server error" },
         id: null,
+      })
+    }
+  })
+
+  socket.on("disconnect", () => {
+    const previousRoom = userRooms.get(socket.id)
+
+    if (previousRoom) {
+      userRooms.delete(socket.id)
+
+      const usersInRoom = Array.from(userRooms.entries())
+        .filter(([_, r]) => r === previousRoom)
+        .map(([id]) => io.sockets.sockets.get(id)?.data.username ?? id)
+
+      io.to(previousRoom).emit("rpc", {
+        jsonrpc: "2.0",
+        method: "activeUsers",
+        params: { room: previousRoom, users: usersInRoom },
       })
     }
   })
